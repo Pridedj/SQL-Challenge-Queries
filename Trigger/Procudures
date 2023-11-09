@@ -1,0 +1,164 @@
+--This SQL code shows that the rentalid was transformed into Times_rented with the count() function and the Total_revenue field is a transformation 
+--of the count of film ids multiplied by the rental rate and cast the output as currency.
+DROP TABLE IF EXISTS Detailed_table;
+CREATE TABLE Detailed_table AS
+SELECT film_id, title, rental_rate :: money, COUNT(rental_id) as Times_rented, (COUNT(film_id) * rental_rate) :: money AS Total_revenue
+FROM All_rentals
+GROUP BY All_rentals.film_id, All_rentals.title, All_rentals.rental_rate
+ORDER BY Total_revenue DESC, title LIMIT 100;
+
+SELECT * FROM Detailed_table; --(Test Query)
+
+
+--Detailed Table
+DROP TABLE IF EXISTS Detailed_table;
+CREATE TABLE Detailed_table AS
+SELECT film_id, title, rental_rate :: money, COUNT(rental_id) as Times_rented, (COUNT(film_id) * rental_rate) :: money AS Total_revenue
+FROM All_rentals
+GROUP BY All_rentals.film_id, All_rentals.title, All_rentals.rental_rate
+ORDER BY Total_revenue DESC, title LIMIT 100;
+
+SELECT * FROM Detailed_table; --Test Query
+
+--Summary Table
+DROP TABLE IF EXISTS Summary_table;
+CREATE TABLE Summary_table AS
+SELECT title, Total_revenue
+FROM Detailed_table
+ORDER BY Total_revenue DESC, Title
+LIMIT 20;
+
+--SELECT * FROM Summary_table; (Test Query)
+
+
+DROP TABLE IF EXISTS All_rentals;
+CREATE TABLE All_rentals AS
+SELECT rent.rental_id, Film.film_id, Film.title, Film.rental_rate
+FROM rental as Rent
+LEFT JOIN inventory as Inventory
+ON Rent.inventory_id = Inventory.inventory_id
+LEFT JOIN film as Film
+ON Film.film_id = Inventory.film_id
+GROUP BY Rent.rental_id, Film.film_id, Film.title, Film.rental_rate
+ORDER BY Rent.rental_id LIMIT 100;
+
+SELECT * FROM All_rentals;
+
+
+CREATE OR REPLACE FUNCTION update_all_rentals()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+
+AS $BODY$
+
+BEGIN
+	SELECT rent.rental_id, Film.film_id, Film.title, Film.rental_rate
+FROM rental as Rent
+LEFT JOIN inventory as Inventory
+ON Rent.inventory_id = Inventory.inventory_id
+LEFT JOIN film as Film
+ON Film.film_id = Inventory.film_id
+GROUP BY Rent.rental_id, Film.film_id, Film.title, Film.rental_rate
+ORDER BY Rent.rental_id LIMIT 100;
+RETURN NEW;
+END;
+$$
+
+--update Detailed Table
+CREATE OR REPLACE FUNCTION update_Detailed_table()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $BODY$ 
+BEGIN
+	DELETE FROM Detailed_table;
+	INSERT INTO Detailed_table
+	SELECT film_id, title, rental_rate :: money, COUNT(rental_id) as Times_rented, (COUNT(film_id) * rental_rate) :: money AS Total_revenue
+	FROM All_rentals
+	GROUP BY All_rentals.film_id, All_rentals.title, All_rentals.rental_rate
+	ORDER BY Total_revenue DESC, title LIMIT 100;
+RETURN NEW;
+END;
+$BODY$
+
+--Update Summary Table
+CREATE OR REPLACE FUNCTION update_Summary_table()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $BODY$
+BEGIN
+	DELETE FROM Summary_table;
+	INSERT INTO Summary_table
+	SELECT title, Total_revenue
+	FROM Detailed_table
+	ORDER BY Total_revenue DESC, Title
+	LIMIT 20;
+RETURN NEW;
+END;
+$BODY$
+
+--Trigger Statements
+CREATE OR REPLACE update_All_rentals
+	AFTER INSERT ON rental
+	FOR EACH STATEMENT EXECUTE PROCEDURE update_All_rentals();
+--Creates Detailed table trigger
+CREATE OR REPLACE TRIGGER update_Detailed_table
+	AFTER INSERT ON All_rentals
+	FOR EACH STATEMENT EXECUTE PROCEDURE update_Detailed_table();
+
+--Creates Summary table trigger
+CREATE OR REPLACE TRIGGER update_Summary_table
+	AFTER INSERT ON detailed_table 
+	FOR EACH STATEMENT EXECUTE PROCEDURE update_Summary_table();
+
+
+--Stored procedure that updates both detailed and summary tables (Procedure structure referenced HERE)
+CREATE OR REPLACE PROCEDURE update_tables()
+LANGUAGE plpgsql
+AS $BODY$
+BEGIN
+ 
+    DELETE FROM All_rentals;
+	INSERT INTO All_rentals
+	SELECT rent.rental_id, Film.film_id, Film.title, Film.rental_rate
+	FROM rental as Rent
+	LEFT JOIN inventory as Inventory
+	ON Rent.inventory_id = Inventory.inventory_id
+	LEFT JOIN film as Film
+	ON Film.film_id = Inventory.film_id
+	GROUP BY Rent.rental_id, Film.film_id, Film.title, Film.rental_rate
+	ORDER BY Rent.rental_id LIMIT 100;
+
+	DELETE FROM detailed_table;
+    INSERT INTO detailed_table
+    SELECT
+        film_id,
+        title,
+        rental_rate :: money,
+        COUNT(film_id) AS times_rented,
+        (COUNT(film_id) * rental_rate) :: money AS Total_revenue
+    FROM all_rentals
+    GROUP BY film_id, title, rental_rate
+    ORDER BY Total_revenue DESC, title
+    LIMIT 100;
+
+    DELETE FROM summary_table;
+    INSERT INTO summary_table
+    SELECT
+        title,
+        Total_revenue
+    FROM detailed_table
+    ORDER BY Total_revenue DESC, title 
+    LIMIT 20;
+END;
+$BODY$;
+
+
+--Test Triggers and Refresh capability
+INSERT INTO All_rentals VALUES (56790, 991, 'Atestament', 85.99), (56791, 991, 'Atestament', 85.99);
+
+SELECT * FROM All_rentals WHERE title ='Atestament';
+
+SELECT * FROM Detailed_table;
+SELECT * FROM Summary_table;
+
+CALL update_tables();
